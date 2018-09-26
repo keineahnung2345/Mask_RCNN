@@ -1159,12 +1159,12 @@ def mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks):
     # Reshape for simplicity. Merge first two dimensions into one.
     target_class_ids = K.reshape(target_class_ids, (-1,))
     mask_shape = tf.shape(target_masks)
-    target_masks = K.reshape(target_masks, (-1, mask_shape[2], mask_shape[3]))
+    target_masks = K.reshape(target_masks, (mask_shape[0]*mask_shape[1], mask_shape[2]*mask_shape[3]))
     pred_shape = tf.shape(pred_masks)
     pred_masks = K.reshape(pred_masks,
-                           (-1, pred_shape[2], pred_shape[3], pred_shape[4]))
-    # Permute predicted masks to [N, num_classes, height, width]
-    pred_masks = tf.transpose(pred_masks, [0, 3, 1, 2])
+                           (pred_shape[0]*pred_shape[1], pred_shape[2]*pred_shape[3], pred_shape[4]))
+    # Permute predicted masks to [N, num_classes, height*width]
+    pred_masks = tf.transpose(pred_masks, [0, 2, 1])
 
     # Only positive ROIs contribute to the loss. And only
     # the class specific mask of each ROI.
@@ -1178,7 +1178,7 @@ def mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks):
     y_pred = tf.gather_nd(pred_masks, indices)
 
     # Compute binary cross entropy. If no positive ROIs, then return 0.
-    # shape: [batch, roi, num_classes]
+    # shape: [N, height*width]
     loss = K.switch(tf.size(y_true) > 0,
                     K.binary_crossentropy(target=y_true, output=y_pred),
                     tf.constant(0.0))
