@@ -1805,6 +1805,9 @@ def data_generator(dataset, config, shuffle=True, augment=False, augmentation=No
                 b = 0
         except (GeneratorExit, KeyboardInterrupt):
             raise
+        except ZeroDivisionError:
+            logging.exception("Your dataset is empty!")
+            raise
         except:
             # Log it and skip the image
             logging.exception("Error processing image {}".format(
