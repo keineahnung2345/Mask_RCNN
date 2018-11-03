@@ -1674,6 +1674,8 @@ def data_generator(dataset, config, shuffle=True, augment=False, augmentation=No
     b = 0  # batch item index
     image_index = -1
     image_ids = np.copy(dataset.image_ids)
+    assert len(image_ids)>0, "Your dataset is empty!"
+    
     error_count = 0
     no_augmentation_sources = no_augmentation_sources or []
 
@@ -1804,9 +1806,6 @@ def data_generator(dataset, config, shuffle=True, augment=False, augmentation=No
                 # start a new batch
                 b = 0
         except (GeneratorExit, KeyboardInterrupt):
-            raise
-        except ZeroDivisionError:
-            logging.exception("Your dataset is empty!")
             raise
         except:
             # Log it and skip the image
