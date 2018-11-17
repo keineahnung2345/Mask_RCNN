@@ -323,13 +323,19 @@ class ProposalLayer(KE.Layer):
             # Pad if needed
             padding = tf.maximum(self.proposal_count - tf.shape(proposals)[0], 0)
             proposals = tf.pad(proposals, [(0, padding), (0, 0)])
-            return proposals
-        proposals = utils.batch_slice([boxes, scores], nms,
-                                      self.config.IMAGES_PER_GPU)
-        return proposals
+            scores = tf.expand_dims(scores, -1)
+            scores = tf.gather(scores, indices)
+            scores = tf.pad(scores, [(0, padding), (0, 0)])
+            return proposals, scores
+
+        outputs = utils.batch_slice([boxes, scores], nms,
+                                       self.config.IMAGES_PER_GPU,
+                                       names = ["boxes", "scores"])
+        return outputs
 
     def compute_output_shape(self, input_shape):
-        return (None, self.proposal_count, 4)
+        return [(None, self.proposal_count, 4),
+                (None, self.proposal_count, 1)]
 
 
 ############################################################
@@ -682,7 +688,7 @@ class DetectionTargetLayer(KE.Layer):
 #  Detection Layer
 ############################################################
 
-def refine_detections_graph(rois, probs, deltas, window, config):
+def refine_detections_graph(rois, roi_scores, probs, deltas, window, config):
     """Refine classified proposals and filter overlaps and return final
     detections.
 
@@ -697,6 +703,7 @@ def refine_detections_graph(rois, probs, deltas, window, config):
     Returns detections shaped: [num_detections, (y1, x1, y2, x2, class_id, score)] where
         coordinates are normalized.
     """
+    probs = tf.multiply(probs, roi_scores)
     # Class IDs per ROI
     class_ids = tf.argmax(probs, axis=1, output_type=tf.int32)
     # Class probability of the top class of each ROI
@@ -795,9 +802,10 @@ class DetectionLayer(KE.Layer):
 
     def call(self, inputs):
         rois = inputs[0]
-        mrcnn_class = inputs[1]
-        mrcnn_bbox = inputs[2]
-        image_meta = inputs[3]
+        roi_scores = inputs[1]
+        mrcnn_class = inputs[2]
+        mrcnn_bbox = inputs[3]
+        image_meta = inputs[4]
 
         # Get windows of images in normalized coordinates. Windows are the area
         # in the image that excludes the padding.
@@ -809,8 +817,8 @@ class DetectionLayer(KE.Layer):
 
         # Run detection refinement graph on each item in the batch
         detections_batch = utils.batch_slice(
-            [rois, mrcnn_class, mrcnn_bbox, window],
-            lambda x, y, w, z: refine_detections_graph(x, y, w, z, self.config),
+            [rois, roi_scores, mrcnn_class, mrcnn_bbox, window],
+            lambda u, x, y, w, z: refine_detections_graph(u, x, y, w, z, self.config),
             self.config.IMAGES_PER_GPU)
 
         # Reshape output
@@ -1959,7 +1967,7 @@ class MaskRCNN():
         # and zero padded.
         proposal_count = config.POST_NMS_ROIS_TRAINING if mode == "training"\
             else config.POST_NMS_ROIS_INFERENCE
-        rpn_rois = ProposalLayer(
+        rpn_rois, rpn_scores = ProposalLayer(
             proposal_count=proposal_count,
             nms_threshold=config.RPN_NMS_THRESHOLD,
             name="ROI",
@@ -2042,7 +2050,7 @@ class MaskRCNN():
             # output is [batch, num_detections, (y1, x1, y2, x2, class_id, score)] in
             # normalized coordinates
             detections = DetectionLayer(config, name="mrcnn_detection")(
-                [rpn_rois, mrcnn_class, mrcnn_bbox, input_image_meta])
+                [rpn_rois, rpn_scores, mrcnn_class, mrcnn_bbox, input_image_meta])
 
             # Create masks for detections
             detection_boxes = KL.Lambda(lambda x: x[..., :4])(detections)
